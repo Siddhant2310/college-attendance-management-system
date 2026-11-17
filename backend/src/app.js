@@ -64,7 +64,7 @@ app.get("/", (req, res) => {
 
 // Central Error Handler
 app.use((err, req, res, next) => {
-    console.error("Server Error:", err.message);
+   console.error("Server Error:", err);
 
     if (res.headersSent) {
         return next(err);

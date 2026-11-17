@@ -52,6 +52,12 @@ const {
 const { protect } = require("../middlewares/authMiddleware");
 const authorizeRoles = require("../middlewares/roleMiddleware");
 const requirePasswordChange = require("../middlewares/requirePasswordChange");
+const {
+    previewStudentImport,
+    confirmStudentImport
+} = require("../controllers/studentImportController");
+
+const uploadStudentExcel = require("../middlewares/studentExcelUpload");
 
 const router = express.Router();
 
@@ -84,6 +90,17 @@ router.get("/students", getStudents);
 router.post(
     "/students/:rollNumber/reset-password",
     resetStudentPassword
+);
+// Bulk Student Excel Import
+router.post(
+    "/students/import/preview",
+    uploadStudentExcel.single("file"),
+    previewStudentImport
+);
+
+router.post(
+    "/students/import/confirm",
+    confirmStudentImport
 );
 // Teacher Assignment Management
 router.post("/teacher-assignments", createTeacherAssignment);

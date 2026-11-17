@@ -8,13 +8,18 @@ import {
     KeyRound,
     GraduationCap,
     Mail,
-    BookOpen,
     AlertCircle,
     CheckCircle,
     Copy,
-    X
+    X,
+    FileSpreadsheet,
+    Download,
+    Upload,
+    FileUp,
+    ShieldCheck
 } from "lucide-react";
 
+import * as XLSX from "xlsx";
 import api from "../../services/api";
 
 const Students = () => {
@@ -27,7 +32,6 @@ const Students = () => {
     const [resettingRoll, setResettingRoll] = useState("");
 
     const [search, setSearch] = useState("");
-    const [selectedBranch, setSelectedBranch] = useState("");
 
     const [message, setMessage] = useState({
         type: "",
@@ -35,6 +39,12 @@ const Students = () => {
     });
 
     const [temporaryPassword, setTemporaryPassword] = useState(null);
+
+    // Bulk import states
+    const [excelFile, setExcelFile] = useState(null);
+    const [previewData, setPreviewData] = useState(null);
+    const [importing, setImporting] = useState(false);
+    const [previewLoading, setPreviewLoading] = useState(false);
 
     const [form, setForm] = useState({
         name: "",
@@ -48,7 +58,6 @@ const Students = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
-            setMessage({ type: "", text: "" });
 
             const [studentResponse, branchResponse, sectionResponse] =
                 await Promise.all([
@@ -64,7 +73,8 @@ const Students = () => {
         } catch (error) {
             setMessage({
                 type: "error",
-                text: error.response?.data?.message ||
+                text:
+                    error.response?.data?.message ||
                     "Unable to load student data."
             });
         } finally {
@@ -88,7 +98,7 @@ const Students = () => {
         });
     }, [sections, form.branchId]);
 
-    // Handle form changes
+    // Handle registration form changes
     const handleChange = (e) => {
         const { name, value } = e.target;
 
@@ -98,7 +108,7 @@ const Students = () => {
         }));
     };
 
-    // Register student
+    // Register one student
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -137,7 +147,8 @@ const Students = () => {
         } catch (error) {
             setMessage({
                 type: "error",
-                text: error.response?.data?.message ||
+                text:
+                    error.response?.data?.message ||
                     "Unable to register student."
             });
         } finally {
@@ -175,12 +186,240 @@ const Students = () => {
         } catch (error) {
             setMessage({
                 type: "error",
-                text: error.response?.data?.message ||
+                text:
+                    error.response?.data?.message ||
                     "Unable to reset student password."
             });
         } finally {
             setResettingRoll("");
         }
+    };
+
+    // Download Excel template
+    const downloadTemplate = () => {
+        const headers = [
+            "Name",
+            "Roll Number",
+            "Email",
+            "Branch Code",
+            "Section",
+            "Semester",
+            "Academic Year"
+        ];
+
+        const worksheet = XLSX.utils.aoa_to_sheet([headers]);
+
+        worksheet["!cols"] = [
+            { wch: 25 },
+            { wch: 18 },
+            { wch: 30 },
+            { wch: 15 },
+            { wch: 12 },
+            { wch: 12 },
+            { wch: 18 }
+        ];
+
+        const workbook = XLSX.utils.book_new();
+
+        XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            "Students"
+        );
+
+        XLSX.writeFile(workbook, "Student_Import_Template.xlsx");
+    };
+
+    // Select Excel file
+    const handleFileChange = (e) => {
+        const file = e.target.files?.[0];
+
+        setPreviewData(null);
+        setMessage({ type: "", text: "" });
+
+        if (!file) {
+            setExcelFile(null);
+            return;
+        }
+
+        const extension = file.name
+            .slice(file.name.lastIndexOf("."))
+            .toLowerCase();
+
+        if (![".xlsx", ".xls"].includes(extension)) {
+            setExcelFile(null);
+            e.target.value = "";
+
+            setMessage({
+                type: "error",
+                text: "Please select an .xlsx or .xls Excel file."
+            });
+
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            setExcelFile(null);
+            e.target.value = "";
+
+            setMessage({
+                type: "error",
+                text: "File size must not exceed 5 MB."
+            });
+
+            return;
+        }
+
+        setExcelFile(file);
+    };
+
+    // Upload Excel and get preview
+    const handlePreviewImport = async () => {
+        if (!excelFile) {
+            setMessage({
+                type: "error",
+                text: "Please select an Excel file first."
+            });
+            return;
+        }
+
+        try {
+            setPreviewLoading(true);
+            setPreviewData(null);
+            setMessage({ type: "", text: "" });
+
+            const formData = new FormData();
+            formData.append("file", excelFile);
+
+            const response = await api.post(
+                "/admin/students/import/preview",
+                formData
+            );
+
+            setPreviewData(response.data);
+
+            setMessage({
+                type: "success",
+                text: response.data.message
+            });
+
+        } catch (error) {
+            // Backend also returns preview details when all rows are invalid.
+            const errorData = error.response?.data;
+
+            if (errorData?.preview) {
+                setPreviewData(errorData);
+            }
+
+            setMessage({
+                type: "error",
+                text:
+                    errorData?.message ||
+                    "Unable to validate the Excel file."
+            });
+
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
+
+    // Download credentials workbook
+    const downloadCredentials = (credentials) => {
+        const rows = credentials.map((student) => ({
+            "Student Name": student.name,
+            "Roll Number": student.rollNumber,
+            "Email": student.email || "",
+            "Temporary Password": student.temporaryPassword
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+
+        worksheet["!cols"] = [
+            { wch: 25 },
+            { wch: 18 },
+            { wch: 30 },
+            { wch: 25 }
+        ];
+
+        const workbook = XLSX.utils.book_new();
+
+        XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            "Student Credentials"
+        );
+
+        XLSX.writeFile(
+            workbook,
+            "Student_Temporary_Credentials.xlsx"
+        );
+    };
+
+    // Confirm bulk import
+    const handleConfirmImport = async () => {
+        if (!previewData?.importId || previewData.validCount === 0) {
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Import ${previewData.validCount} valid student records? Invalid rows will be skipped.`
+        );
+
+        if (!confirmed) return;
+
+        try {
+            setImporting(true);
+            setMessage({ type: "", text: "" });
+
+            const response = await api.post(
+                "/admin/students/import/confirm",
+                {
+                    importId: previewData.importId
+                }
+            );
+
+            // Generate the credentials Excel immediately.
+            downloadCredentials(response.data.credentials || []);
+
+            setMessage({
+                type: "success",
+                text: `${response.data.importedCount} students imported successfully. Credentials Excel downloaded.`
+            });
+
+            // Clear temporary import data.
+            setExcelFile(null);
+            setPreviewData(null);
+
+            const fileInput = document.getElementById(
+                "student-excel-file"
+            );
+
+            if (fileInput) fileInput.value = "";
+
+            await fetchData();
+
+        } catch (error) {
+            setMessage({
+                type: "error",
+                text:
+                    error.response?.data?.message ||
+                    "Unable to import students."
+            });
+        } finally {
+            setImporting(false);
+        }
+    };
+
+    // Cancel preview
+    const cancelPreview = () => {
+        setPreviewData(null);
+        setExcelFile(null);
+
+        const fileInput = document.getElementById(
+            "student-excel-file"
+        );
+
+        if (fileInput) fileInput.value = "";
     };
 
     // Filter students
@@ -241,11 +480,13 @@ const Students = () => {
 
             {/* Notifications */}
             {message.text && (
-                <div className={`flex items-start gap-3 rounded-xl border p-4 ${
-                    message.type === "success"
-                        ? "border-green-200 bg-green-50 text-green-700"
-                        : "border-red-200 bg-red-50 text-red-700"
-                }`}>
+                <div
+                    className={`flex items-start gap-3 rounded-xl border p-4 ${
+                        message.type === "success"
+                            ? "border-green-200 bg-green-50 text-green-700"
+                            : "border-red-200 bg-red-50 text-red-700"
+                    }`}
+                >
                     {message.type === "success" ? (
                         <CheckCircle size={20} />
                     ) : (
@@ -257,7 +498,9 @@ const Students = () => {
                     </p>
 
                     <button
-                        onClick={() => setMessage({ type: "", text: "" })}
+                        onClick={() =>
+                            setMessage({ type: "", text: "" })
+                        }
                         className="ml-auto"
                     >
                         <X size={18} />
@@ -318,7 +561,259 @@ const Students = () => {
 
             </div>
 
-            {/* Registration Form */}
+            {/* Bulk Excel Import */}
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+
+                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="rounded-lg bg-green-50 p-3 text-green-600">
+                            <FileSpreadsheet size={23} />
+                        </div>
+
+                        <div>
+                            <h2 className="text-lg font-bold text-slate-800">
+                                Bulk Import Students
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                Register multiple students using an Excel file.
+                            </p>
+                        </div>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={downloadTemplate}
+                        className="flex items-center justify-center gap-2 rounded-lg border border-green-200 px-4 py-2.5 text-sm font-semibold text-green-700 hover:bg-green-50"
+                    >
+                        <Download size={17} />
+                        Download Excel Template
+                    </button>
+                </div>
+
+                <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-6">
+
+                    <div className="flex flex-col items-center text-center">
+                        <div className="mb-3 rounded-full bg-blue-100 p-4 text-blue-600">
+                            <Upload size={26} />
+                        </div>
+
+                        <h3 className="font-semibold text-slate-800">
+                            Upload Student Excel File
+                        </h3>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                            Supported formats: .xlsx and .xls
+                        </p>
+
+                        <p className="text-xs text-slate-400">
+                            Maximum file size: 5 MB
+                        </p>
+
+                        <input
+                            id="student-excel-file"
+                            type="file"
+                            accept=".xlsx,.xls"
+                            onChange={handleFileChange}
+                            className="mt-5 block w-full max-w-sm text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2.5 file:font-semibold file:text-white hover:file:bg-blue-700"
+                        />
+
+                        {excelFile && (
+                            <div className="mt-4 flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm text-slate-700 shadow-sm">
+                                <FileSpreadsheet
+                                    size={18}
+                                    className="text-green-600"
+                                />
+                                <span className="font-medium">
+                                    {excelFile.name}
+                                </span>
+                                <span className="text-xs text-slate-400">
+                                    ({(excelFile.size / 1024).toFixed(1)} KB)
+                                </span>
+                            </div>
+                        )}
+
+                        <button
+                            type="button"
+                            onClick={handlePreviewImport}
+                            disabled={!excelFile || previewLoading}
+                            className="mt-5 flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <FileUp size={18} />
+                            {previewLoading
+                                ? "Validating Excel..."
+                                : "Upload & Preview"}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Preview Results */}
+                {previewData && (
+                    <div className="mt-6 space-y-5">
+
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800">
+                                    Import Preview
+                                </h3>
+                                <p className="text-sm text-slate-500">
+                                    Review the records before confirming import.
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={cancelPreview}
+                                disabled={importing}
+                                className="flex items-center gap-2 self-start rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                            >
+                                <X size={16} />
+                                Cancel
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+
+                            <div className="rounded-lg border border-slate-200 p-4">
+                                <p className="text-sm text-slate-500">
+                                    Total Rows
+                                </p>
+                                <p className="mt-1 text-2xl font-bold text-slate-800">
+                                    {previewData.totalRows ?? 0}
+                                </p>
+                            </div>
+
+                            <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+                                <p className="text-sm text-green-700">
+                                    Valid Rows
+                                </p>
+                                <p className="mt-1 text-2xl font-bold text-green-700">
+                                    {previewData.validCount ?? 0}
+                                </p>
+                            </div>
+
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                                <p className="text-sm text-red-700">
+                                    Invalid Rows
+                                </p>
+                                <p className="mt-1 text-2xl font-bold text-red-700">
+                                    {previewData.invalidCount ?? 0}
+                                </p>
+                            </div>
+
+                        </div>
+
+                        <div className="overflow-x-auto rounded-xl border border-slate-200">
+                            <table className="w-full min-w-[900px] text-left text-sm">
+
+                                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-3">Excel Row</th>
+                                        <th className="px-4 py-3">Student</th>
+                                        <th className="px-4 py-3">Roll Number</th>
+                                        <th className="px-4 py-3">Email</th>
+                                        <th className="px-4 py-3">Section</th>
+                                        <th className="px-4 py-3">Status / Errors</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody className="divide-y divide-slate-100">
+                                    {(previewData.preview || []).map((row) => (
+                                        <tr key={row.rowNumber}>
+                                            <td className="px-4 py-3 text-slate-500">
+                                                {row.rowNumber}
+                                            </td>
+
+                                            <td className="px-4 py-3 font-medium text-slate-800">
+                                                {row.name || "-"}
+                                            </td>
+
+                                            <td className="px-4 py-3">
+                                                {row.rollNumber || "-"}
+                                            </td>
+
+                                            <td className="px-4 py-3">
+                                                {row.email || "-"}
+                                            </td>
+
+                                            <td className="px-4 py-3">
+                                                {row.branchCode || "-"} / {row.sectionName || "-"}
+                                            </td>
+
+                                            <td className="px-4 py-3">
+                                                {row.valid ? (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                                                        <CheckCircle size={13} />
+                                                        Valid
+                                                    </span>
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+                                                            <AlertCircle size={13} />
+                                                            Invalid
+                                                        </span>
+
+                                                        {(row.errors || []).map((error, index) => (
+                                                            <p
+                                                                key={index}
+                                                                className="text-xs text-red-600"
+                                                            >
+                                                                • {error}
+                                                            </p>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+
+                            </table>
+                        </div>
+
+                        {previewData.invalidCount > 0 && (
+                            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+                                <AlertCircle size={20} className="shrink-0" />
+                                <p className="text-sm">
+                                    Invalid rows will not be imported. Only the valid rows will be created when you confirm.
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="flex flex-col gap-3 rounded-xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+
+                            <div className="flex items-start gap-2 text-sm text-slate-600">
+                                <ShieldCheck
+                                    size={19}
+                                    className="shrink-0 text-green-600"
+                                />
+                                <span>
+                                    Temporary passwords will be generated and downloaded in a separate credentials Excel file.
+                                </span>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={handleConfirmImport}
+                                disabled={
+                                    importing ||
+                                    !previewData.importId ||
+                                    previewData.validCount === 0
+                                }
+                                className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-green-600 px-6 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <CheckCircle size={18} />
+                                {importing
+                                    ? "Importing Students..."
+                                    : `Confirm Import (${previewData.validCount || 0})`}
+                            </button>
+                        </div>
+
+                    </div>
+                )}
+
+            </div>
+
+            {/* Individual Student Registration */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
 
                 <div className="mb-6 flex items-center gap-3">
@@ -331,7 +826,7 @@ const Students = () => {
                             Register New Student
                         </h2>
                         <p className="text-sm text-slate-500">
-                            Create a student login account and academic profile.
+                            Create an individual student login account and academic profile.
                         </p>
                     </div>
                 </div>
@@ -564,11 +1059,13 @@ const Students = () => {
                                             </td>
 
                                             <td className="px-6 py-4">
-                                                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                                    student.isActive
-                                                        ? "bg-green-100 text-green-700"
-                                                        : "bg-red-100 text-red-700"
-                                                }`}>
+                                                <span
+                                                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                                        student.isActive
+                                                            ? "bg-green-100 text-green-700"
+                                                            : "bg-red-100 text-red-700"
+                                                    }`}
+                                                >
                                                     {student.isActive
                                                         ? "Active"
                                                         : "Inactive"}
@@ -577,7 +1074,9 @@ const Students = () => {
 
                                             <td className="px-6 py-4">
                                                 <button
-                                                    onClick={() => handleResetPassword(student.rollNumber)}
+                                                    onClick={() =>
+                                                        handleResetPassword(student.rollNumber)
+                                                    }
                                                     disabled={
                                                         !student.isActive ||
                                                         resettingRoll === student.rollNumber
