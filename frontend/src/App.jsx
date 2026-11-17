@@ -2,7 +2,8 @@
 import {
     Suspense,
     lazy,
-    useState
+    useState,
+    useEffect
 } from "react";
 
 import {
@@ -52,6 +53,38 @@ const StudentCorrections = lazy(() => import("./pages/student/Corrections"));
 const TeacherLayout = lazy(() => import("./layouts/TeacherLayout"));
 const StudentLayout = lazy(() => import("./layouts/StudentLayout"));
 const AdminLayout = lazy(() => import("./layouts/AdminLayout"));
+
+
+// ==========================================
+// DYNAMIC BROWSER TAB TITLE
+// ==========================================
+
+const DynamicPageTitle = () => {
+    const location = useLocation();
+
+    useEffect(() => {
+        const path = location.pathname;
+
+        if (path.startsWith("/admin")) {
+            document.title =
+                "Admin Portal | College Attendance System";
+        } else if (path.startsWith("/teacher")) {
+            document.title =
+                "Teacher Portal | College Attendance System";
+        } else if (path.startsWith("/student")) {
+            document.title =
+                "Student Portal | College Attendance System";
+        } else if (path === "/change-password") {
+            document.title =
+                "Change Password | College Attendance System";
+        } else {
+            document.title =
+                "College Attendance System";
+        }
+    }, [location.pathname]);
+
+    return null;
+};
 
 
 // ==========================================
@@ -321,6 +354,8 @@ const PasswordChangeForm = () => {
 function App() {
     return (
         <BrowserRouter>
+
+            <DynamicPageTitle />
 
             <Suspense fallback={<LoadingScreen />}>
 
