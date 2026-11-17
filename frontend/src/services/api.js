@@ -1,8 +1,12 @@
 
 import axios from "axios";
 
+const API_BASE_URL =
+    import.meta.env.VITE_API_URL ||
+    "http://localhost:3001/api/v1";
+
 const api = axios.create({
-    baseURL: "http://localhost:3001/api/v1",
+    baseURL: API_BASE_URL,
     headers: {
         "Content-Type": "application/json"
     },
@@ -27,8 +31,7 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-
-        // Handle expired or invalid authentication only
+        // Handle expired or invalid authentication
         if (error.response?.status === 401) {
             localStorage.removeItem("attendanceToken");
             localStorage.removeItem("attendanceUser");
@@ -48,4 +51,5 @@ api.interceptors.response.use(
         return Promise.reject(error);
     }
 );
+
 export default api;
