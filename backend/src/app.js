@@ -15,21 +15,19 @@ app.use(helmet());
 
 // CORS Configuration
 const allowedOrigins = [
-    "http://localhost:5173"
-];
+    "http://localhost:5173",
+    process.env.FRONTEND_URL
+].filter(Boolean);
 
 app.use(
     cors({
         origin: (origin, callback) => {
             // Allow requests without an Origin header
-            // (for example, server-to-server or health checks).
             if (!origin || allowedOrigins.includes(origin)) {
                 return callback(null, true);
             }
 
-            return callback(
-                new Error("Not allowed by CORS")
-            );
+            return callback(new Error("Not allowed by CORS"));
         },
         credentials: true
     })
@@ -37,6 +35,7 @@ app.use(
 
 // Request Parsing Middleware
 app.use(express.json({ limit: "10kb" }));
+
 app.use(
     express.urlencoded({
         extended: true,
