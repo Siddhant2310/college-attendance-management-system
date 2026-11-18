@@ -1,5 +1,7 @@
+
 const mongoose = require("mongoose");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 
 const User = require("../models/userModel");
 const Student = require("../models/studentModel");
@@ -33,7 +35,10 @@ const createStudent = async (req, res) => {
         });
     }
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (
+        email &&
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+    ) {
         return res.status(400).json({
             success: false,
             message: "Please provide a valid email address."
@@ -41,14 +46,12 @@ const createStudent = async (req, res) => {
     }
 
     const temporaryPassword = crypto.randomBytes(9).toString("base64url");
-
     const session = await mongoose.startSession();
 
     try {
         let createdStudent;
 
         await session.withTransaction(async () => {
-            // Verify that section exists and is active
             const section = await Section.findOne({
                 _id: sectionId,
                 isActive: true
@@ -60,7 +63,6 @@ const createStudent = async (req, res) => {
                 throw error;
             }
 
-            // Create user login account
             const [user] = await User.create(
                 [{
                     name: normalizedName,
@@ -74,7 +76,6 @@ const createStudent = async (req, res) => {
                 { session }
             );
 
-            // Create student academic profile
             const [student] = await Student.create(
                 [{
                     userId: user._id,
@@ -128,6 +129,8 @@ const createStudent = async (req, res) => {
         await session.endSession();
     }
 };
+
+
 // GET ALL STUDENTS
 const getStudents = async (req, res) => {
     try {
@@ -158,7 +161,9 @@ const getStudents = async (req, res) => {
         });
     }
 };
-// RESET STUDENT PASSWORD
+
+
+// RESET INDIVIDUAL STUDENT PASSWORD
 const resetStudentPassword = async (req, res) => {
     try {
         const { rollNumber } = req.params;
@@ -210,7 +215,141 @@ const resetStudentPassword = async (req, res) => {
     }
 };
 
+
+// BULK RESET PASSWORDS FOR ALL ACTIVE STUDENTS
+const bulkResetStudentPasswords = async (req, res) => {
+    try {
+        // Fetch all active students and their active user accounts.
+        const students = await Student.find({
+            isActive: true
+        }).populate({
+            path: "userId",
+            match: {
+                isActive: true,
+                role: "STUDENT"
+            },
+            select: "name loginId email isActive role"
+        });
+
+        const activeStudents = students.filter(
+            student => student.userId
+        );
+
+        if (activeStudents.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No active student accounts found."
+            });
+        }
+
+        // Generate and hash each student's temporary password.
+        const preparedRecords = await Promise.all(
+            activeStudents.map(async student => {
+                const user = student.userId;
+
+                const temporaryPassword = crypto
+                    .randomBytes(9)
+                    .toString("base64url");
+
+                const hashedPassword = await bcrypt.hash(
+                    temporaryPassword,
+                    12
+                );
+
+                return {
+                    userId: user._id,
+                    name: user.name,
+                    rollNumber: student.rollNumber,
+                    loginId: user.loginId,
+                    email: user.email || "",
+                    temporaryPassword,
+                    hashedPassword
+                };
+            })
+        );
+
+        // Prepare one bulk database operation.
+        const operations = preparedRecords.map(record => ({
+            updateOne: {
+                filter: {
+                    _id: record.userId,
+                    isActive: true,
+                    role: "STUDENT"
+                },
+                update: {
+                    $set: {
+                        password: record.hashedPassword,
+                        isFirstLogin: true
+                    }
+                }
+            }
+        }));
+
+        // Apply updates together in a short transaction.
+        const session = await mongoose.startSession();
+
+        try {
+            await session.withTransaction(async () => {
+                const result = await User.bulkWrite(
+                    operations,
+                    {
+                        session,
+                        ordered: true
+                    }
+                );
+
+                if (result.matchedCount !== preparedRecords.length) {
+                    const error = new Error(
+                        "Some student accounts changed during the reset. No passwords were reset."
+                    );
+                    error.statusCode = 409;
+                    throw error;
+                }
+            });
+        } finally {
+            await session.endSession();
+        }
+
+        // Return plaintext credentials only after successful commit.
+        const credentials = preparedRecords.map(record => ({
+            name: record.name,
+            rollNumber: record.rollNumber,
+            loginId: record.loginId,
+            email: record.email,
+            temporaryPassword: record.temporaryPassword
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: "Student passwords reset successfully.",
+            count: credentials.length,
+            credentials
+        });
+
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        console.error(
+            "Bulk Reset Student Passwords Error:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: "Unable to reset student passwords."
+        });
+    }
+};
+
+
 module.exports = {
     createStudent,
-    getStudents, resetStudentPassword
+    getStudents,
+    resetStudentPassword,
+    bulkResetStudentPasswords
 };

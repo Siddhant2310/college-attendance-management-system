@@ -30,6 +30,7 @@ const Students = () => {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [resettingRoll, setResettingRoll] = useState("");
+    const [bulkResetting, setBulkResetting] = useState(false);
 
     const [search, setSearch] = useState("");
 
@@ -156,7 +157,7 @@ const Students = () => {
         }
     };
 
-    // Reset student password
+    // Reset individual student password
     const handleResetPassword = async (rollNumber) => {
         const confirmed = window.confirm(
             `Are you sure you want to reset the password for ${rollNumber}?`
@@ -304,7 +305,6 @@ const Students = () => {
             });
 
         } catch (error) {
-            // Backend also returns preview details when all rows are invalid.
             const errorData = error.response?.data;
 
             if (errorData?.preview) {
@@ -325,9 +325,14 @@ const Students = () => {
 
     // Download credentials workbook
     const downloadCredentials = (credentials) => {
+        if (!credentials || credentials.length === 0) {
+            throw new Error("No student credentials were returned.");
+        }
+
         const rows = credentials.map((student) => ({
             "Student Name": student.name,
             "Roll Number": student.rollNumber,
+            "Login ID": student.loginId || student.rollNumber,
             "Email": student.email || "",
             "Temporary Password": student.temporaryPassword
         }));
@@ -336,6 +341,7 @@ const Students = () => {
 
         worksheet["!cols"] = [
             { wch: 25 },
+            { wch: 18 },
             { wch: 18 },
             { wch: 30 },
             { wch: 25 }
@@ -353,6 +359,60 @@ const Students = () => {
             workbook,
             "Student_Temporary_Credentials.xlsx"
         );
+    };
+
+    // Bulk reset passwords for all active students
+    const handleBulkResetPasswords = async () => {
+        if (activeStudents === 0) {
+            setMessage({
+                type: "error",
+                text: "There are no active students to reset."
+            });
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `WARNING: You are about to reset passwords for all ${activeStudents} active students.\n\n` +
+            "Every student will receive a new temporary password.\n" +
+            "Their existing passwords will stop working.\n\n" +
+            "A new Excel file containing all credentials will be downloaded.\n\n" +
+            "Do you want to continue?"
+        );
+
+        if (!confirmed) return;
+
+        try {
+            setBulkResetting(true);
+            setMessage({ type: "", text: "" });
+            setTemporaryPassword(null);
+
+            const response = await api.post(
+    "/admin/students/bulk-reset-passwords",
+    {},
+    { timeout: 120000 }
+);
+
+            // Download credentials Excel immediately.
+            downloadCredentials(response.data.credentials || []);
+
+            setMessage({
+                type: "success",
+                text: `${response.data.count} student passwords reset successfully. New credentials Excel downloaded.`
+            });
+
+            await fetchData();
+
+        } catch (error) {
+            setMessage({
+                type: "error",
+                text:
+                    error.response?.data?.message ||
+                    error.message ||
+                    "Unable to reset student passwords."
+            });
+        } finally {
+            setBulkResetting(false);
+        }
     };
 
     // Confirm bulk import
@@ -378,7 +438,6 @@ const Students = () => {
                 }
             );
 
-            // Generate the credentials Excel immediately.
             downloadCredentials(response.data.credentials || []);
 
             setMessage({
@@ -386,7 +445,6 @@ const Students = () => {
                 text: `${response.data.importedCount} students imported successfully. Credentials Excel downloaded.`
             });
 
-            // Clear temporary import data.
             setExcelFile(null);
             setPreviewData(null);
 
@@ -403,6 +461,7 @@ const Students = () => {
                 type: "error",
                 text:
                     error.response?.data?.message ||
+                    error.message ||
                     "Unable to import students."
             });
         } finally {
@@ -442,7 +501,7 @@ const Students = () => {
     }, [students, search]);
 
     const activeStudents = students.filter(
-        (student) => student.isActive
+        (student) => student.isActive && student.userId?.isActive !== false
     ).length;
 
     const inactiveStudents = students.length - activeStudents;
@@ -465,17 +524,34 @@ const Students = () => {
                     </p>
                 </div>
 
-                <button
-                    onClick={fetchData}
-                    disabled={loading}
-                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                    <RefreshCw
-                        size={16}
-                        className={loading ? "animate-spin" : ""}
-                    />
-                    Refresh Data
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                        onClick={handleBulkResetPasswords}
+                        disabled={
+                            loading ||
+                            bulkResetting ||
+                            activeStudents === 0
+                        }
+                        className="flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <KeyRound size={16} />
+                        {bulkResetting
+                            ? "Resetting All..."
+                            : "Bulk Reset Passwords"}
+                    </button>
+
+                    <button
+                        onClick={fetchData}
+                        disabled={loading || bulkResetting}
+                        className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                        <RefreshCw
+                            size={16}
+                            className={loading ? "animate-spin" : ""}
+                        />
+                        Refresh Data
+                    </button>
+                </div>
             </div>
 
             {/* Notifications */}
@@ -1079,7 +1155,8 @@ const Students = () => {
                                                     }
                                                     disabled={
                                                         !student.isActive ||
-                                                        resettingRoll === student.rollNumber
+                                                        resettingRoll === student.rollNumber ||
+                                                        bulkResetting
                                                     }
                                                     className="flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                                                 >

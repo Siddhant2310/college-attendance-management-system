@@ -25,9 +25,9 @@ const {
 const {
     createStudent,
     getStudents,
-    resetStudentPassword
+    resetStudentPassword,
+    bulkResetStudentPasswords
 } = require("../controllers/studentController");
-
 const {
     createTeacherAssignment,
     getTeacherAssignments
@@ -90,6 +90,12 @@ router.get("/students", getStudents);
 router.post(
     "/students/:rollNumber/reset-password",
     resetStudentPassword
+);
+
+// Bulk Reset Passwords for All Active Students
+router.post(
+    "/students/bulk-reset-passwords",
+    bulkResetStudentPasswords
 );
 // Bulk Student Excel Import
 router.post(
